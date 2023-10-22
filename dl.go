@@ -27,7 +27,7 @@ func tokenFrom(s string) (string, error) {
 	return s, nil
 }
 
-var ErrNoToken = errors.New("no github token")
+var ErrNoToken = errors.New("no authentication token")
 
 func getGithubToken() (string, error) {
 	if os.Getenv("EGET_GITHUB_TOKEN") != "" {
@@ -39,7 +39,17 @@ func getGithubToken() (string, error) {
 	return "", ErrNoToken
 }
 
-func SetAuthHeader(req *http.Request) *http.Request {
+func getGitlabToken() (string, error) {
+	if os.Getenv("EGET_GITLAB_TOKEN") != "" {
+		return tokenFrom(os.Getenv("EGET_GITLAB_TOKEN"))
+	}
+	if os.Getenv("GITLAB_TOKEN") != "" {
+		return tokenFrom(os.Getenv("GITLAB_TOKEN"))
+	}
+	return "", ErrNoToken
+}
+
+func SetGithubAuthHeader(req *http.Request) *http.Request {
 	token, err := getGithubToken()
 	if err != nil && !errors.Is(err, ErrNoToken) {
 		fmt.Fprintln(os.Stderr, "warning: not using github token:", err)
@@ -56,6 +66,23 @@ func SetAuthHeader(req *http.Request) *http.Request {
 	return req
 }
 
+func SetGitlabAuthHeader(req *http.Request) *http.Request {
+	token, err := getGitlabToken()
+	if err != nil && !errors.Is(err, ErrNoToken) {
+		fmt.Fprintln(os.Stderr, "warning: not using gitlab token:", err)
+	}
+
+	if req.URL.Scheme == "https" && strings.HasPrefix(req.URL.Path, "/api/v4/") && err == nil {
+		if opts.DisableSSL {
+			fmt.Fprintln(os.Stderr, "error: cannot use GitLab token if SSL verification is disabled")
+			os.Exit(1)
+		}
+		req.Header.Set("Authorization", fmt.Sprintf("bearer %s", token))
+	}
+
+	return req
+}
+
 func Get(url string) (*http.Response, error) {
 	req, err := http.NewRequest("GET", url, nil)
 
@@ -63,7 +90,11 @@ func Get(url string) (*http.Response, error) {
 		return nil, err
 	}
 
-	req = SetAuthHeader(req)
+	if strings.HasPrefix(url, "https://gitlab.com/api/v4/") {
+		req = SetGitlabAuthHeader(req)
+	} else {
+		req = SetGithubAuthHeader(req)
+	}
 
 	proxyClient := &http.Client{Transport: &http.Transport{
 		Proxy:           http.ProxyFromEnvironment,
@@ -107,7 +138,7 @@ func GetRateLimit() (RateLimit, error) {
 		return RateLimit{}, err
 	}
 
-	req = SetAuthHeader(req)
+	req = SetGithubAuthHeader(req)
 
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
 

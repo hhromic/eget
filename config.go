@@ -17,6 +17,7 @@ type ConfigGlobal struct {
 	DownloadOnly bool   `toml:"download_only"`
 	File         string `toml:"file"`
 	GithubToken  string `toml:"github_token"`
+	GitlabToken  string `toml:"gitlab_token"`
 	Quiet        bool   `toml:"quiet"`
 	ShowHash     bool   `toml:"show_hash"`
 	Source       bool   `toml:"download_source"`
@@ -135,6 +136,7 @@ func InitializeConfig() (*Config, error) {
 				All:          false,
 				DownloadOnly: false,
 				GithubToken:  "",
+				GitlabToken:  "",
 				Quiet:        false,
 				ShowHash:     false,
 				Source:       false,
@@ -155,6 +157,10 @@ func InitializeConfig() (*Config, error) {
 
 	if !config.Meta.MetaData.IsDefined("global", "github_token") {
 		config.Global.GithubToken = ""
+	}
+
+	if !config.Meta.MetaData.IsDefined("global", "gitlab_token") {
+		config.Global.GitlabToken = ""
 	}
 
 	if !config.Meta.MetaData.IsDefined("global", "quiet") {
@@ -230,6 +236,10 @@ func update[T any](config T, cli *T) T {
 func SetGlobalOptionsFromConfig(config *Config, parser *flags.Parser, opts *Flags, cli CliFlags) error {
 	if config.Global.GithubToken != "" && os.Getenv("EGET_GITHUB_TOKEN") == "" {
 		os.Setenv("EGET_GITHUB_TOKEN", config.Global.GithubToken)
+	}
+
+	if config.Global.GitlabToken != "" && os.Getenv("EGET_GITLAB_TOKEN") == "" {
+		os.Setenv("EGET_GITLAB_TOKEN", config.Global.GitlabToken)
 	}
 
 	opts.Tag = update("", cli.Tag)

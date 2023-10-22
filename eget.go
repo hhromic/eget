@@ -41,11 +41,19 @@ func Cut(s, sep string) (before, after string, found bool) {
 
 var ghrgx = regexp.MustCompile(`^(http(s)?://)?github\.com/[\w,\-,_]+/[\w,\-,_]+(.git)?(/)?$`)
 
+var glrgx = regexp.MustCompile(`^(http(s)?://)?gitlab\.com/[\w,\-,_]+(/[\w,\-,_]+)+(.git)?(/)?$`)
+
 // IsGithubUrl returns true if s is a URL with github.com as the host.
 func IsGithubUrl(s string) bool {
 	return ghrgx.MatchString(s)
 }
 
+// IsGitlabUrl returns true if s is a URL with gitlab.com as the host.
+func IsGitlabUrl(s string) bool {
+	return glrgx.MatchString(s)
+}
+
+// IsLocalFile returns true if s is an existing local file.
 func IsLocalFile(s string) bool {
 	_, err := os.Stat(s)
 	return err == nil
@@ -72,44 +80,81 @@ func checksumAsset(asset string, assets []string) string {
 }
 
 // Determine the appropriate Finder to use. If opts.URL is provided, we use
-// a DirectAssetFinder. Otherwise we use a GithubAssetFinder. When a Github
-// repo is provided, we assume the repo name is the 'tool' name (for direct
-// URLs, the tool name is unknown and remains empty).
+// a DirectAssetFinder. Otherwise we use a GithubAssetFinder or GitlabAssetFinder.
+// When a Github or Gitlab repo is provided, we assume the repo name is the 'tool' name
+// (for direct URLs, the tool name is unknown and remains empty).
 func getFinder(project string, opts *Flags) (finder Finder, tool string) {
-	if IsLocalFile(project) || (IsUrl(project) && !IsGithubUrl(project)) {
+	isLocalFile := IsLocalFile(project)
+
+	var isGithubUrl bool
+	var isGitlabUrl bool
+	if !isLocalFile || IsUrl(project) {
+		isGithubUrl = IsGithubUrl(project)
+		isGitlabUrl = IsGitlabUrl(project)
+	} else {
+		isGithubUrl = false
+		isGitlabUrl = false
+	}
+
+	if isLocalFile {
 		finder = &DirectAssetFinder{
 			URL: project,
 		}
 		opts.System = "all"
 	} else {
-		if IsGithubUrl(project) {
+		repo := project
+
+		if isGithubUrl {
 			_, after, found := Cut(project, "github.com/")
 			if found {
 				project = strings.Trim(after, "/")
 			} else {
 				fatal(fmt.Sprintf("invalid GitHub repo URL %s", project))
 			}
+
+			repo = project
+			if strings.Count(repo, "/") != 1 {
+				fatal("invalid argument (must be of the form `user/repo`)")
+			}
 		}
 
-		repo := project
-		if strings.Count(repo, "/") != 1 {
-			fatal("invalid argument (must be of the form `user/repo`)")
+		if isGitlabUrl {
+			_, after, found := Cut(project, "gitlab.com/")
+			if found {
+				project = strings.Trim(after, "/")
+			} else {
+				fatal(fmt.Sprintf("invalid GitLab repo URL %s", project))
+			}
+
+			repo = project
 		}
+
 		parts := strings.Split(repo, "/")
-		if parts[0] == "" || parts[1] == "" {
-			fatal("invalid argument (must be of the form `user/repo`)")
+		for _, p := range parts {
+			if p == "" {
+				fatal("invalid argument (empty part beween `/` separator)")
+			}
 		}
-		tool = parts[1]
+		tool = parts[len(parts)-1]
 
 		if opts.Source {
 			tag := "master"
 			if opts.Tag != "" {
 				tag = opts.Tag
 			}
-			finder = &GithubSourceFinder{
-				Repo: repo,
-				Tag:  tag,
-				Tool: tool,
+
+			if isGitlabUrl {
+				finder = &GitlabSourceFinder{
+					Repo: repo,
+					Tag:  tag,
+					Tool: tool,
+				}
+			} else {
+				finder = &GithubSourceFinder{
+					Repo: repo,
+					Tag:  tag,
+					Tool: tool,
+				}
 			}
 		} else {
 			tag := "latest"
@@ -124,11 +169,20 @@ func getFinder(project string, opts *Flags) (finder Finder, tool string) {
 				mint = bintime(last, opts.Output)
 			}
 
-			finder = &GithubAssetFinder{
-				Repo:       repo,
-				Tag:        tag,
-				Prerelease: opts.Prerelease,
-				MinTime:    mint,
+			if isGitlabUrl {
+				finder = &GitlabAssetFinder{
+					Repo:       repo,
+					Tag:        tag,
+					Prerelease: opts.Prerelease,
+					MinTime:    mint,
+				}
+			} else {
+				finder = &GithubAssetFinder{
+					Repo:       repo,
+					Tag:        tag,
+					Prerelease: opts.Prerelease,
+					MinTime:    mint,
+				}
 			}
 		}
 	}
